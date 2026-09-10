@@ -1,0 +1,413 @@
+@import "tailwindcss";
+
+/* ============================================================
+   CLOTHZA Design System — visual foundation only
+   Single source of truth for tokens. No page-specific styles.
+   ============================================================ */
+
+@theme {
+  /* Color system — restrained warm neutrals + one subtle accent */
+  --color-ivory: #faf8f4;
+  --color-parchment: #f2eee6;
+  --color-charcoal: #1c1b1a;
+  --color-fog: #6f6a61;
+  --color-linen: #e7e2d8;
+  --color-porcelain: #ffffff;
+  --color-cream: #fdfcf9;
+  --color-bronze: #8a6d45;
+  --color-bronze-deep: #6e5636;
+
+  /* Typography — one family for everything */
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI",
+    Roboto, sans-serif;
+
+  /* Shape + shadow — refined, never pill-heavy, never glossy */
+  --radius-clothza-sm: 3px;
+  --radius-clothza-md: 4px;
+  --shadow-clothza-card: 0 1px 2px rgba(28, 27, 26, 0.04);
+  --shadow-clothza-panel: 0 1px 3px rgba(28, 27, 26, 0.05);
+}
+
+/* ---------------- Global styles ---------------- */
+
+@layer base {
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
+  }
+
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    margin: 0;
+    background-color: var(--color-ivory);
+    color: var(--color-charcoal);
+    font-family: var(--font-sans);
+    font-size: 1rem;
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+
+  #root {
+    min-height: 100vh;
+  }
+
+  img {
+    max-width: 100%;
+    display: block;
+  }
+
+  a {
+    color: inherit;
+    text-decoration: none;
+    transition: color 180ms ease;
+  }
+
+  a:hover {
+    color: var(--color-bronze-deep);
+  }
+
+  ::selection {
+    background-color: var(--color-parchment);
+    color: var(--color-charcoal);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-bronze);
+    outline-offset: 2px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
+
+/* ---------------- Typography scale ---------------- */
+
+@layer components {
+  .type-display {
+    font-size: clamp(2.5rem, 5vw, 4rem);
+    line-height: 1.05;
+    letter-spacing: -0.02em;
+    font-weight: 500;
+    color: var(--color-charcoal);
+  }
+
+  .type-h1 {
+    font-size: clamp(2rem, 4vw, 3rem);
+    line-height: 1.1;
+    letter-spacing: -0.015em;
+    font-weight: 500;
+    color: var(--color-charcoal);
+  }
+
+  .type-h2 {
+    font-size: clamp(1.5rem, 3vw, 2rem);
+    line-height: 1.2;
+    letter-spacing: -0.01em;
+    font-weight: 500;
+    color: var(--color-charcoal);
+  }
+
+  .type-h3 {
+    font-size: 1.25rem;
+    line-height: 1.35;
+    letter-spacing: -0.005em;
+    font-weight: 500;
+    color: var(--color-charcoal);
+  }
+
+  .type-body {
+    font-size: 1rem;
+    line-height: 1.7;
+    font-weight: 400;
+    color: var(--color-charcoal);
+  }
+
+  .type-body-muted {
+    font-size: 1rem;
+    line-height: 1.7;
+    font-weight: 400;
+    color: var(--color-fog);
+  }
+
+  .type-small {
+    font-size: 0.875rem;
+    line-height: 1.6;
+    font-weight: 400;
+    color: var(--color-fog);
+  }
+
+  .type-nav {
+    font-size: 0.875rem;
+    line-height: 1.5;
+    letter-spacing: 0.08em;
+    font-weight: 500;
+    text-transform: uppercase;
+    color: var(--color-charcoal);
+  }
+
+  .type-price {
+    font-size: 1rem;
+    line-height: 1.5;
+    font-weight: 500;
+    letter-spacing: 0.01em;
+    font-variant-numeric: tabular-nums;
+    color: var(--color-charcoal);
+  }
+
+  .type-label {
+    font-size: 0.75rem;
+    line-height: 1.5;
+    letter-spacing: 0.12em;
+    font-weight: 500;
+    text-transform: uppercase;
+    color: var(--color-fog);
+  }
+
+  .type-brand {
+    font-size: clamp(2rem, 4vw, 2.75rem);
+    line-height: 1.1;
+    letter-spacing: 0.32em;
+    font-weight: 500;
+    text-indent: 0.32em;
+    color: var(--color-charcoal);
+  }
+
+  .type-tagline {
+    font-size: 1.125rem;
+    line-height: 1.6;
+    letter-spacing: 0.04em;
+    font-weight: 400;
+    color: var(--color-fog);
+  }
+}
+
+/* ---------------- Layout system ---------------- */
+
+@layer components {
+  .clothza-container {
+    width: 100%;
+    max-width: 76rem;
+    margin-inline: auto;
+    padding-inline: 1.25rem;
+  }
+
+  @media (min-width: 768px) {
+    .clothza-container {
+      padding-inline: 2rem;
+    }
+  }
+
+  @media (min-width: 1024px) {
+    .clothza-container {
+      padding-inline: 2.5rem;
+    }
+  }
+
+  .clothza-section {
+    padding-block: 3.5rem;
+  }
+
+  @media (min-width: 768px) {
+    .clothza-section {
+      padding-block: 5rem;
+    }
+  }
+
+  @media (min-width: 1024px) {
+    .clothza-section {
+      padding-block: 6rem;
+    }
+  }
+}
+
+/* ---------------- Button system ---------------- */
+
+@layer components {
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 2.75rem;
+    padding-inline: 1.5rem;
+    padding-block: 0.625rem;
+    font-size: 0.875rem;
+    line-height: 1.5;
+    letter-spacing: 0.04em;
+    font-weight: 500;
+    border-radius: var(--radius-clothza-sm);
+    border: 1px solid transparent;
+    cursor: pointer;
+    transition:
+      background-color 180ms ease,
+      border-color 180ms ease,
+      color 180ms ease;
+  }
+
+  .btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .btn-primary {
+    background-color: var(--color-charcoal);
+    color: var(--color-ivory);
+    border-color: var(--color-charcoal);
+  }
+
+  .btn-primary:hover:not(:disabled) {
+    background-color: #2b2a28;
+    border-color: #2b2a28;
+  }
+
+  .btn-secondary {
+    background-color: var(--color-porcelain);
+    color: var(--color-charcoal);
+    border-color: var(--color-linen);
+  }
+
+  .btn-secondary:hover:not(:disabled) {
+    background-color: var(--color-cream);
+    border-color: var(--color-charcoal);
+  }
+
+  .btn-ghost {
+    background-color: transparent;
+    color: var(--color-charcoal);
+    border-color: transparent;
+    padding-inline: 0.75rem;
+  }
+
+  .btn-ghost:hover:not(:disabled) {
+    background-color: rgba(28, 27, 26, 0.05);
+  }
+}
+
+/* ---------------- Form elements ---------------- */
+
+@layer components {
+  .field-label {
+    display: block;
+    font-size: 0.75rem;
+    line-height: 1.5;
+    letter-spacing: 0.12em;
+    font-weight: 500;
+    text-transform: uppercase;
+    color: var(--color-fog);
+    margin-bottom: 0.5rem;
+  }
+
+  .field-input,
+  .field-select,
+  .field-textarea {
+    width: 100%;
+    min-height: 2.75rem;
+    padding-inline: 0.875rem;
+    padding-block: 0.625rem;
+    font-size: 0.9375rem;
+    line-height: 1.6;
+    font-family: var(--font-sans);
+    color: var(--color-charcoal);
+    background-color: var(--color-porcelain);
+    border: 1px solid var(--color-linen);
+    border-radius: var(--radius-clothza-sm);
+    transition:
+      border-color 180ms ease,
+      box-shadow 180ms ease;
+  }
+
+  .field-textarea {
+    min-height: 6.5rem;
+    resize: vertical;
+  }
+
+  .field-input::placeholder,
+  .field-textarea::placeholder {
+    color: #a8a29a;
+  }
+
+  .field-input:focus,
+  .field-select:focus,
+  .field-textarea:focus {
+    outline: none;
+    border-color: var(--color-charcoal);
+    box-shadow: 0 0 0 3px rgba(138, 109, 69, 0.15);
+  }
+
+  .field-input:disabled,
+  .field-select:disabled,
+  .field-textarea:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+    background-color: var(--color-parchment);
+  }
+
+  .field-check,
+  .field-radio {
+    width: 1rem;
+    height: 1rem;
+    accent-color: var(--color-charcoal);
+  }
+}
+
+/* ---------------- Surface / border system ---------------- */
+
+@layer components {
+  .card {
+    background-color: var(--color-porcelain);
+    border: 1px solid var(--color-linen);
+    border-radius: var(--radius-clothza-md);
+    box-shadow: var(--shadow-clothza-card);
+  }
+
+  .panel {
+    background-color: var(--color-cream);
+    border: 1px solid var(--color-linen);
+    border-radius: var(--radius-clothza-md);
+    box-shadow: var(--shadow-clothza-panel);
+  }
+
+  .divider {
+    height: 1px;
+    width: 100%;
+    background-color: var(--color-linen);
+    border: 0;
+  }
+}
+
+/* ---------------- Homepage subtle motion ---------------- */
+
+@layer utilities {
+  @keyframes clothza-rise {
+    from {
+      opacity: 0;
+      transform: translateY(14px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  .hero-entrance {
+    animation: clothza-rise 700ms ease-out both;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .hero-entrance {
+      animation: none;
+    }
+  }
+}
