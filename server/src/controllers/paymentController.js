@@ -56,8 +56,10 @@ async function restoreStock(lines) {
 }
 
 /* Resolve + validate live cart lines against MongoDB.
-   Returns { lines, totals } or throws a customer-safe HTTP error. */
-async function resolveCartLines(userId) {
+   Returns { lines, totals } or throws a customer-safe HTTP error.
+   Exported for the Step-30 demo-payment flow, which validates
+   identically. */
+export async function resolveCartLines(userId) {
   const cart = await Cart.findOne({ user: userId })
   if (!cart || !Array.isArray(cart.items) || cart.items.length === 0) {
     throw invalid('Your bag is empty.', 400)

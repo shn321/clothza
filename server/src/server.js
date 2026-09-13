@@ -1,10 +1,31 @@
 import 'dotenv/config'
 import { createApp } from './app.js'
 import { connectDB, disconnectDB, redactCredentials } from './config/db.js'
+import { checkProductionConfig } from './utils/prodConfig.js'
 
 const PORT = Number(process.env.PORT) || 5000
 
 async function start() {
+  /* Step 33 — production fail-fast: refuse to serve traffic without the
+     required configuration instead of failing obscurely at runtime.
+     Development keeps the warn-and-continue behavior below. */
+  const { fatal, warnings } = checkProductionConfig(process.env)
+  for (const warning of warnings) {
+    console.warn(`[config] ${warning}`)
+  }
+  if (fatal.length > 0) {
+    for (const problem of fatal) {
+      console.error(`[config] FATAL: ${problem}`)
+    }
+    console.error('[config] Refusing to start in production with missing configuration.')
+    process.exit(1)
+  }
+  /* Step 32 — fail-fast visibility: without a signing secret every
+     authenticated request 500s, so warn loudly at boot instead of
+     failing silently at runtime. Never prints the secret itself. */
+  if (!process.env.JWT_SECRET) {
+    console.warn('[auth] JWT_SECRET is not set — login, sessions and all authenticated routes will fail.')
+  }
   if (!process.env.MONGODB_URI) {
     console.warn('[db] MONGODB_URI is not set — starting API without a database connection.')
   } else {

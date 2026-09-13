@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
+import { useSiteContent } from '../../hooks/useSiteContent.js'
 
 function InstagramIcon({ size = 18 }) {
   return (
@@ -58,43 +59,41 @@ function XIcon({ size = 18 }) {
   )
 }
 
-const SHOP_LINKS = [
+const FALLBACK_SHOP = [
   { label: 'New Arrivals', to: '/shop?sort=newest' },
   { label: 'Men', to: '/men' },
   { label: 'Women', to: '/women' },
   { label: 'Collections', to: '/collections' },
 ]
 
-const CARE_LINKS = [
+const FALLBACK_CARE = [
   { label: 'Contact', to: '/contact' },
   { label: 'Shipping', to: '/shipping' },
   { label: 'Returns', to: '/returns' },
   { label: 'FAQ', to: '/faq' },
 ]
 
-const COMPANY_LINKS = [
+const FALLBACK_COMPANY = [
   { label: 'About', to: '/about' },
   { label: 'Privacy', to: '/privacy' },
   { label: 'Terms', to: '/terms' },
 ]
 
-const SOCIAL_LINKS = [
-  { label: 'Instagram', href: '#', Icon: InstagramIcon },
-  { label: 'Facebook', href: '#', Icon: FacebookIcon },
-  { label: 'X', href: '#', Icon: XIcon },
-]
+const SOCIAL_ICONS = { Instagram: InstagramIcon, Facebook: FacebookIcon, X: XIcon }
 
 const footerLink =
   'inline-block py-1 text-sm text-fog transition-colors duration-200 hover:text-charcoal'
 
 function LinkColumn({ title, links }) {
+  const safe = Array.isArray(links) && links.length > 0 ? links : []
+  if (safe.length === 0) return null
   return (
     <nav aria-label={title}>
       <h2 className="type-label">{title}</h2>
       <ul className="mt-4 flex flex-col gap-1">
-        {links.map((l) => (
+        {safe.map((l) => (
           <li key={l.label}>
-            <Link to={l.to} className={footerLink}>
+            <Link to={l.to || '#'} className={footerLink}>
               {l.label}
             </Link>
           </li>
@@ -105,8 +104,21 @@ function LinkColumn({ title, links }) {
 }
 
 function Footer() {
+  const { content } = useSiteContent('site.footer')
   const [email, setEmail] = useState('')
   const [status, setStatus] = useState({ type: 'idle', message: '' })
+
+  const shopLinks = content?.shopLinks?.length ? content.shopLinks : FALLBACK_SHOP
+  const careLinks = content?.customerCareLinks?.length ? content.customerCareLinks : FALLBACK_CARE
+  const companyLinks = content?.companyLinks?.length ? content.companyLinks : FALLBACK_COMPANY
+  const socialLinks =
+    Array.isArray(content?.socialLinks) && content.socialLinks.length > 0
+      ? content.socialLinks
+      : [
+          { label: 'Instagram', href: '#' },
+          { label: 'Facebook', href: '#' },
+          { label: 'X', href: '#' },
+        ]
 
   const handleSubmit = (e) => {
     e.preventDefault()
@@ -133,37 +145,40 @@ function Footer() {
               aria-label="CLOTHZA home"
               className="text-lg font-medium tracking-[0.28em]"
             >
-              CLOTHZA
+              {content?.brandName || 'CLOTHZA'}
             </Link>
-            <p className="type-small mt-2">Style Made Simple.</p>
+            <p className="type-small mt-2">{content?.tagline || 'Style Made Simple.'}</p>
             <p className="type-small mt-4 max-w-xs">
-              Thoughtfully designed essentials for modern everyday style.
+              {content?.description || 'Thoughtfully designed essentials for modern everyday style.'}
             </p>
             <div className="mt-5 flex items-center gap-1">
-              {SOCIAL_LINKS.map(({ label, href, Icon }) => (
-                <a
-                  key={label}
-                  href={href}
-                  aria-label={`CLOTHZA on ${label}`}
-                  className="inline-flex items-center justify-center rounded-[3px] p-2 text-charcoal transition-colors duration-200 hover:bg-charcoal/5"
-                >
-                  <Icon />
-                </a>
-              ))}
+              {socialLinks.map(({ label, href }) => {
+                const Icon = SOCIAL_ICONS[label] || InstagramIcon
+                return (
+                  <a
+                    key={label}
+                    href={href || '#'}
+                    aria-label={`CLOTHZA on ${label}`}
+                    className="inline-flex items-center justify-center rounded-[3px] p-2 text-charcoal transition-colors duration-200 hover:bg-charcoal/5"
+                  >
+                    <Icon />
+                  </a>
+                )
+              })}
             </div>
           </div>
 
           {/* Link columns */}
-          <LinkColumn title="Shop" links={SHOP_LINKS} />
-          <LinkColumn title="Customer Care" links={CARE_LINKS} />
-          <LinkColumn title="Company" links={COMPANY_LINKS} />
+          <LinkColumn title="Shop" links={shopLinks} />
+          <LinkColumn title="Customer Care" links={careLinks} />
+          <LinkColumn title="Company" links={companyLinks} />
 
           {/* Newsletter */}
           <div>
-            <h2 className="type-label">Join the CLOTHZA list</h2>
+            <h2 className="type-label">{content?.newsletterHeading || 'Join the CLOTHZA list'}</h2>
             <p className="type-small mt-4">
-              Updates on new collections and private offers. No noise, unsubscribe
-              anytime.
+              {content?.newsletterDescription ||
+                'Updates on new collections and private offers. No noise, unsubscribe anytime.'}
             </p>
             <form onSubmit={handleSubmit} noValidate className="mt-4">
               <label htmlFor="footer-newsletter-email" className="field-label">
@@ -197,7 +212,7 @@ function Footer() {
                   status.type === 'error' ? 'text-red-800' : 'text-fog'
                 }`}
               >
-                {status.message || '\u00A0'}
+                {status.message || ' '}
               </p>
             </form>
           </div>
@@ -206,7 +221,7 @@ function Footer() {
         {/* Bottom bar */}
         <hr className="divider mt-12" />
         <div className="flex flex-col gap-3 pt-6 sm:flex-row sm:items-center sm:justify-between">
-          <p className="type-small">© 2026 CLOTHZA. All rights reserved.</p>
+          <p className="type-small">{content?.copyrightText || '© 2026 CLOTHZA. All rights reserved.'}</p>
           <div className="flex items-center gap-6">
             <Link to="/privacy" className={footerLink}>
               Privacy

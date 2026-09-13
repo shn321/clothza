@@ -33,38 +33,71 @@ const TRANSACTIONAL_TYPES = new Set([
   'ORDER_CANCELLED',
 ])
 
+/* Step 31 — lifecycle types that may exist only ONCE per order.
+   A valid flow can never repeat them (statuses never recur, an order is
+   placed and paid once), so a retried admin request or a double-fired
+   event resolves to the existing notification instead of a duplicate.
+   PAYMENT_FAILED is intentionally excluded: each failed attempt is a
+   distinct event (per-transition guards at the call sites already make
+   retries silent). */
+const ONCE_PER_ORDER_TYPES = new Set([
+  'ORDER_PLACED',
+  'PAYMENT_SUCCESS',
+  'ORDER_CONFIRMED',
+  'ORDER_PROCESSING',
+  'ORDER_SHIPPED',
+  'ORDER_DELIVERED',
+  'ORDER_CANCELLED',
+])
+
+/* Step 31 — customer-facing copy. COD and simulated demo payments get
+   their own wording so shoppers always know what happened; status
+   wording matches the portfolio spec. No secrets or payment details
+   are ever included — only the order number. */
 const ORDER_COPY = {
-  ORDER_PLACED: (n) => ({
-    title: 'Order placed',
-    message: `Your order ${n} has been placed successfully.`,
-  }),
-  PAYMENT_SUCCESS: (n) => ({
-    title: 'Payment successful',
-    message: `Payment for order ${n} was successful.`,
-  }),
+  ORDER_PLACED: (n, order) =>
+    order?.paymentMethod === 'cod'
+      ? {
+        title: 'Order placed',
+        message: `Your Cash on Delivery order ${n} has been placed successfully.`,
+      }
+      : {
+        title: 'Order placed',
+        message: `Your order ${n} has been placed successfully.`,
+      },
+  PAYMENT_SUCCESS: (n, order) =>
+    order?.paymentProvider === 'demo' || order?.paymentMethod === 'demo_online'
+      ? {
+        title: 'Demo payment successful',
+        message: `Your demo payment for order ${n} was successful. This was a simulated payment — no real money moved.`,
+      }
+      : {
+        title: 'Payment successful',
+        message: `Payment for order ${n} was successful.`,
+      },
   PAYMENT_FAILED: (n) => ({
     title: 'Payment failed',
     message: `Payment for order ${n} did not go through. Your bag is saved — please try again.`,
   }),
   ORDER_CONFIRMED: (n) => ({
-    title: 'Order confirmed',
-    message: `Order ${n} has been confirmed and is being prepared.`,
+    title: 'Order Confirmed',
+    message: `Your order ${n} has been confirmed.`,
   }),
   ORDER_PROCESSING: (n) => ({
-    title: 'Order processing',
-    message: `Order ${n} is being processed.`,
+    title: 'Order Processing',
+    message: `Your order ${n} is now being prepared.`,
   }),
   ORDER_SHIPPED: (n) => ({
-    title: 'Order shipped',
-    message: `Order ${n} has been shipped and is on its way.`,
+    title: 'Order Shipped',
+    message: `Your order ${n} has been shipped.`,
   }),
   ORDER_DELIVERED: (n) => ({
-    title: 'Order delivered',
-    message: `Order ${n} has been delivered. We hope you love it.`,
+    title: 'Order Delivered',
+    message: `Your order ${n} has been delivered.`,
   }),
   ORDER_CANCELLED: (n) => ({
-    title: 'Order cancelled',
-    message: `Order ${n} has been cancelled.`,
+    title: 'Order Cancelled',
+    message: `Your order ${n} has been cancelled.`,
   }),
 }
 
@@ -96,12 +129,13 @@ export async function createNotification({ userId, type, title, message, orderNu
   })
 }
 
-/* Build the standard order-lifecycle notification content. */
+/* Build the standard order-lifecycle notification content. The owner
+   always comes from the order document — never from request data. */
 export async function createOrderNotification(order, type) {
   if (!order || !order.user) throw invalid('Order owner is required.', 500)
   const copy = ORDER_COPY[type]
   if (!copy) throw invalid('Invalid order notification type.', 500)
-  const { title, message } = copy(order.orderNumber)
+  const { title, message } = copy(order.orderNumber, order)
   return createNotification({
     userId: order.user,
     type,
@@ -119,10 +153,32 @@ function recipientEmail(order) {
 /* Full lifecycle event: persist the notification, then attempt the
    matching transactional email. NEVER throws — returns a summary.
    Email is skipped (not failed) when there is no template for the
-   type, no recipient, or the user opted out of non-transactional mail. */
+   type, no recipient, or the user opted out of non-transactional mail.
+   Step 31 — once-per-order dedup: if this exact (owner, type, order)
+   notification already exists (retried admin request, double-fired
+   event), the existing one is returned and NO duplicate email is sent.
+   Complements the unchanged-status early return in the admin flow. */
 export async function notifyOrderEvent(order, type) {
   const result = { notification: null, email: { sent: false, skipped: true } }
   if (!order || !order.user) return result
+  if (ONCE_PER_ORDER_TYPES.has(type) && order.orderNumber) {
+    try {
+      const existing = await Notification.findOne({
+        user: order.user,
+        type,
+        orderNumber: order.orderNumber,
+      }).lean()
+      if (existing) {
+        return {
+          notification: existing,
+          email: { sent: false, skipped: true, reason: 'duplicate' },
+          deduped: true,
+        }
+      }
+    } catch {
+      // Dedup lookup must never block the lifecycle event.
+    }
+  }
   try {
     result.notification = await createOrderNotification(order, type)
   } catch {

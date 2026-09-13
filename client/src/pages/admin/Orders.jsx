@@ -140,8 +140,11 @@ function Orders() {
                   <td className="px-4 py-3 tabular-nums">₹{Number(o.total).toLocaleString('en-IN')}</td>
                   <td className="px-4 py-3">
                     <span className="type-small capitalize">
-                      {o.paymentMethod} · {o.paymentStatus}
+                      {o.paymentMethodLabel || o.paymentMethod} · {o.paymentStatus}
                     </span>
+                    {o.isDemoPayment && (
+                      <span className="type-small ml-1 uppercase text-bronze-deep">· Demo</span>
+                    )}
                   </td>
                   <td className="px-4 py-3">
                     <OrderStatusBadge status={o.orderStatus} />

@@ -1,17 +1,20 @@
 import { useEffect, useState } from 'react'
-import { LogOut } from 'lucide-react'
+import { Bell, LogOut } from 'lucide-react'
 import { Link, useNavigate } from 'react-router-dom'
 import OrderStatusBadge from '../components/order/OrderStatusBadge.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
+import { useNotifications } from '../context/NotificationContext.jsx'
 import { formatINR } from '../data/home.js'
 import { fetchOrders } from '../lib/api.js'
 import { formatDateLong } from '../utils/checkout.js'
 
-/* Account page: identity, status, order history, logout.
-   Orders load once per session from the persistent order API. */
+/* Account page: identity, notifications preview, order history, logout.
+   Orders load once per session from the persistent order API;
+   notifications come from the shared shelf (loaded on sign-in). */
 
 function Account() {
   const { user, logout } = useAuth()
+  const notifications = useNotifications()
   const navigate = useNavigate()
   const [loggingOut, setLoggingOut] = useState(false)
   const [orders, setOrders] = useState([])
@@ -51,6 +54,8 @@ function Account() {
   if (!user) return null
 
   const initial = String(user.name || user.email || '?').trim().charAt(0).toUpperCase()
+  const unreadCount = notifications?.unreadCount || 0
+  const recentNotifications = (notifications?.items || []).slice(0, 3)
 
   return (
     <main className="bg-ivory text-charcoal">
@@ -113,6 +118,48 @@ function Account() {
             </button>
           </section>
 
+          <section aria-label="Notifications" className="card mt-6 p-6">
+            <div className="flex items-baseline justify-between gap-4">
+              <h2 className="type-h3 flex items-center gap-2">
+                <Bell size={18} strokeWidth={1.5} aria-hidden="true" className="text-fog" />
+                Notifications
+              </h2>
+              {unreadCount > 0 && (
+                <span
+                  className="inline-flex items-center rounded-full bg-charcoal px-2.5 py-0.5 text-xs font-medium text-ivory"
+                  aria-label={`${unreadCount} unread notifications`}
+                >
+                  {unreadCount > 99 ? '99+' : unreadCount} new
+                </span>
+              )}
+            </div>
+
+            {recentNotifications.length === 0 ? (
+              <p className="type-body-muted mt-3 text-sm">No notifications yet.</p>
+            ) : (
+              <ul className="mt-3 flex flex-col divide-y divide-linen">
+                {recentNotifications.map((n) => (
+                  <li key={n.id} className="flex items-start gap-2.5 py-2.5 first:pt-0 last:pb-0">
+                    <span
+                      aria-hidden="true"
+                      className={`mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full ${n.isRead ? 'bg-linen' : 'bg-bronze'}`}
+                    />
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-medium">{n.title}</p>
+                      <p className="type-small truncate">{n.message}</p>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <Link
+              to="/account/notifications"
+              className="mt-4 inline-block text-sm font-medium underline underline-offset-4"
+            >
+              View all notifications
+            </Link>
+          </section>
+
           <section aria-label="My orders" className="card mt-6 p-6">
             <div className="flex items-baseline justify-between gap-4">
               <h2 className="type-h3">My Orders</h2>
@@ -144,6 +191,16 @@ function Account() {
                         {[formatDateLong(order.createdAt), `${order.itemCount} ${order.itemCount === 1 ? 'item' : 'items'}`]
                           .filter(Boolean)
                           .join(' · ')}
+                      </p>
+                      {(order.items || []).length > 0 && (
+                        <p className="type-small mt-0.5 truncate">
+                          {(order.items || []).slice(0, 2).map((l) => `${l.name} × ${l.qty}`).join(', ')}
+                          {(order.items || []).length > 2 ? ` +${(order.items || []).length - 2} more` : ''}
+                        </p>
+                      )}
+                      <p className="type-small mt-0.5 capitalize">
+                        {order.paymentMethodLabel || order.paymentMethod} · {order.paymentStatus}
+                        {order.isDemoPayment ? ' · Demo' : ''}
                       </p>
                       <p className="type-price mt-1 text-sm">{formatINR(order.total)}</p>
                     </div>

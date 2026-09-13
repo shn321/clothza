@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { LayoutDashboard, Menu, Package, ShoppingBag, Star, Tag, Users, X } from 'lucide-react'
+import { FileText, LayoutDashboard, Menu, Package, ShoppingBag, Star, Tag, Users, X } from 'lucide-react'
 import { Link, NavLink, Outlet } from 'react-router-dom'
 
 /* Admin shell — responsive sidebar on desktop, collapsible drawer on
@@ -12,6 +12,7 @@ const NAV = [
   { to: '/admin/reviews', label: 'Reviews', Icon: Star },
   { to: '/admin/coupons', label: 'Coupons', Icon: Tag },
   { to: '/admin/customers', label: 'Customers', Icon: Users },
+  { to: '/admin/content', label: 'Content', Icon: FileText },
 ]
 
 function navClass({ isActive }) {

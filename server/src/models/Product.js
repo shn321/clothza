@@ -43,6 +43,16 @@ const productSchema = new mongoose.Schema(
     isFeatured: { type: Boolean, default: false, index: true },
     isNewArrival: { type: Boolean, default: false, index: true },
     isBestSeller: { type: Boolean, default: false, index: true },
+    /* Visibility gate (Step 29): unpublished products are hidden from
+       every public endpoint but stay in MongoDB with their history.
+       Defaults true so the existing catalog stays live; public queries
+       use `{ isPublished: { $ne: false } }` so legacy documents without
+       the field keep working. */
+    isPublished: { type: Boolean, default: true, index: true },
+    /* Previous slugs — when an admin renames a slug, the old value is
+       kept here (max 10) so existing /product/:slug links keep
+       resolving instead of breaking. */
+    previousSlugs: { type: [String], default: [] },
   },
   { timestamps: true, toJSON: { virtuals: true }, toObject: { virtuals: true } },
 )
@@ -59,6 +69,17 @@ productSchema.virtual('bestseller').get(function () {
 })
 productSchema.virtual('badges').get(function () {
   return this.tags
+})
+
+/* Full-text search across the customer-facing fields. The public list
+   keeps its regex filters; this index exists for efficient keyword
+   search as the catalog grows. */
+productSchema.index({
+  name: 'text',
+  description: 'text',
+  category: 'text',
+  subcategory: 'text',
+  tags: 'text',
 })
 
 const Product = mongoose.models.Product || mongoose.model('Product', productSchema)

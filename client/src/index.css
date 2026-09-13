@@ -405,9 +405,33 @@
     animation: clothza-rise 700ms ease-out both;
   }
 
+  /* Step 30 — indeterminate demo-payment progress bar. */
+  @keyframes demo-slide {
+    from {
+      width: 8%;
+      margin-left: 0;
+    }
+    50% {
+      width: 45%;
+      margin-left: 30%;
+    }
+    to {
+      width: 12%;
+      margin-left: 88%;
+    }
+  }
+
+  .demo-progress {
+    animation: demo-slide 1.4s ease-in-out infinite alternate;
+  }
+
   @media (prefers-reduced-motion: reduce) {
     .hero-entrance {
       animation: none;
+    }
+    .demo-progress {
+      animation: none;
+      width: 50%;
     }
   }
 }

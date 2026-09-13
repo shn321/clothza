@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Eye, EyeOff } from 'lucide-react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext.jsx'
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
@@ -8,6 +8,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 function Register() {
   const { register } = useAuth()
   const navigate = useNavigate()
+  const location = useLocation()
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -15,6 +16,9 @@ function Register() {
   const [errors, setErrors] = useState({})
   const [serverError, setServerError] = useState('')
   const [submitting, setSubmitting] = useState(false)
+
+  /* Return guests to where they came from (e.g. /checkout) after signup. */
+  const from = location.state?.from || '/account'
 
   function validate() {
     const next = {}
@@ -35,7 +39,7 @@ function Register() {
     setSubmitting(true)
     try {
       await register({ name: name.trim(), email: email.trim(), password })
-      navigate('/account', { replace: true })
+      navigate(from, { replace: true })
     } catch (err) {
       setServerError(err?.message || 'Registration failed. Please try again.')
     } finally {

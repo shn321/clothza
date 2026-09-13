@@ -92,7 +92,22 @@ function OrderConfirmation() {
                 <dt className="text-fog">Payment method</dt>
                 <dd className="text-right font-medium">{order.payment?.label || '—'}</dd>
               </div>
+              {order.payment?.status && (
+                <div className="flex justify-between gap-6 border-t border-linen pt-3">
+                  <dt className="text-fog">Payment status</dt>
+                  <dd className="text-right font-medium capitalize">{order.payment.status}</dd>
+                </div>
+              )}
             </dl>
+            {order.payment?.isDemo && (
+              <p className="type-small mt-4 rounded-[3px] border border-bronze/40 bg-cream p-3">
+                Demo payment — simulated for this portfolio project. No real money moved.
+              </p>
+            )}
+            <p className="type-small mt-4">
+              This confirmation is saved — reloading this page will not place another order.
+              Track live status under My Orders.
+            </p>
           </section>
 
           {/* Items + totals */}

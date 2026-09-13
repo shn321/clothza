@@ -4,6 +4,7 @@ import express from 'express'
 import adminRoutes from './routes/adminRoutes.js'
 import authRoutes from './routes/authRoutes.js'
 import cartRoutes from './routes/cartRoutes.js'
+import contentRoutes from './routes/contentRoutes.js'
 import couponRoutes from './routes/couponRoutes.js'
 import healthRoutes from './routes/health.js'
 import notificationRoutes from './routes/notificationRoutes.js'
@@ -43,9 +44,15 @@ export function createApp() {
   app.use('/api/auth/register', authLimiter())
   app.use('/api/payments/razorpay/order', paymentLimiter())
   app.use('/api/payments/razorpay/verify', paymentLimiter())
+  /* Step 30 — same brute-force/replay probing guard for the simulated
+     demo-payment endpoints. */
+  app.use('/api/payments/demo/order', paymentLimiter())
+  app.use('/api/payments/demo/confirm', paymentLimiter())
+  app.use('/api/payments/demo/verify', paymentLimiter())
 
   app.use('/api', healthRoutes)
   app.use('/api/products', productRoutes)
+  app.use('/api/content', contentRoutes)
   app.use('/api', reviewRoutes)
   app.use('/api/auth', authRoutes)
   app.use('/api/cart', cartRoutes)

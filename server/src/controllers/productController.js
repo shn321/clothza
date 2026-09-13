@@ -27,7 +27,10 @@ function parsePositiveInt(value, fallback) {
 
 export async function listProducts(req, res, next) {
   try {
-    const filter = {}
+    /* Public catalog shows published products only. `{ $ne: false }`
+       (rather than `true`) keeps legacy documents that predate the
+       isPublished field visible. */
+    const filter = { isPublished: { $ne: false } }
 
     if (req.query.gender !== undefined) {
       const gender = String(req.query.gender).toLowerCase().trim()
@@ -96,8 +99,12 @@ export async function listProducts(req, res, next) {
 export async function getProductBySlug(req, res, next) {
   try {
     const slug = String(req.params.slug || '').toLowerCase().trim()
-    const product = await Product.findOne({ slug }).lean({ virtuals: true })
-    if (!product) {
+    /* Current slug first, then previous slugs so renamed products keep
+       their old /product/:slug links working. Unpublished → 404. */
+    const product =
+      (await Product.findOne({ slug }).lean({ virtuals: true })) ||
+      (await Product.findOne({ previousSlugs: slug }).lean({ virtuals: true }))
+    if (!product || product.isPublished === false) {
       return res.status(404).json({ success: false, message: 'Product not found' })
     }
     res.status(200).json({ success: true, data: product })

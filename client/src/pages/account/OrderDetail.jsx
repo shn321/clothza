@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import OrderStatusBadge from '../../components/order/OrderStatusBadge.jsx'
+import OrderStatusTimeline from '../../components/order/OrderStatusTimeline.jsx'
 import { formatINR } from '../../data/home.js'
 import { cancelOrder, fetchOrder } from '../../lib/api.js'
 import { formatDateLong } from '../../utils/checkout.js'
@@ -114,10 +115,22 @@ function OrderDetail() {
           <div className="mt-2 flex flex-wrap items-center gap-3">
             <h1 className="type-h2">Order details</h1>
             <OrderStatusBadge status={order.orderStatus} />
+            {order.isDemoPayment && (
+              <span className="inline-flex items-center rounded-full border border-bronze/40 bg-cream px-2.5 py-1 text-xs font-medium uppercase tracking-wide text-bronze-deep">
+                Demo payment
+              </span>
+            )}
           </div>
           <p className="type-small mt-2">
             Placed {formatDateLong(order.createdAt) || 'recently'} · {order.itemCount} {order.itemCount === 1 ? 'item' : 'items'}
           </p>
+
+          <section aria-label="Order progress" className="card mt-6 p-6">
+            <h2 className="type-label">Order progress</h2>
+            <div className="mt-4">
+              <OrderStatusTimeline status={order.orderStatus} />
+            </div>
+          </section>
 
           <section aria-label="Ordered products" className="card mt-6 p-6">
             <h2 className="type-label">Ordered products</h2>
@@ -145,11 +158,23 @@ function OrderDetail() {
                 <dt className="text-fog">Subtotal</dt>
                 <dd className="font-medium">{formatINR(order.subtotal)}</dd>
               </div>
+              {Number(order.discount) > 0 && (
+                <div className="flex justify-between gap-6">
+                  <dt className="text-fog">
+                    Discount{order.coupon?.code ? ` (${order.coupon.code})` : ''}
+                  </dt>
+                  <dd className="font-medium">−{formatINR(order.discount)}</dd>
+                </div>
+              )}
               <div className="flex justify-between gap-6">
                 <dt className="text-fog">Delivery ({order.deliveryMethod?.label || 'Standard'})</dt>
                 <dd className="font-medium">
                   {order.shippingCost === 0 ? 'Free' : formatINR(order.shippingCost)}
                 </dd>
+              </div>
+              <div className="flex justify-between gap-6">
+                <dt className="text-fog">Tax</dt>
+                <dd className="font-medium">{formatINR(order.tax ?? 0)}</dd>
               </div>
               <div className="flex justify-between gap-6 border-t border-linen pt-3">
                 <dt className="font-medium">Total amount</dt>
@@ -170,6 +195,14 @@ function OrderDetail() {
                 <dd className="break-all text-right font-medium">{order.customer?.email || '—'}</dd>
               </div>
               <div className="flex justify-between gap-6 border-b border-linen pb-3">
+                <dt className="text-fog">Phone</dt>
+                <dd className="text-right font-medium">{order.customer?.phone || '—'}</dd>
+              </div>
+              <div className="flex justify-between gap-6 border-b border-linen pb-3">
+                <dt className="text-fog">Order date</dt>
+                <dd className="text-right font-medium">{formatDateLong(order.createdAt) || '—'}</dd>
+              </div>
+              <div className="flex justify-between gap-6 border-b border-linen pb-3">
                 <dt className="text-fog">Delivery address</dt>
                 <dd className="max-w-56 text-right font-medium">
                   {addressParts.length > 0 ? addressParts.join(', ') : '—'}
@@ -177,7 +210,10 @@ function OrderDetail() {
               </div>
               <div className="flex justify-between gap-6 border-b border-linen pb-3">
                 <dt className="text-fog">Payment method</dt>
-                <dd className="text-right font-medium">{order.paymentMethodLabel || order.paymentMethod}</dd>
+                <dd className="text-right font-medium">
+                  {order.paymentMethodLabel || order.paymentMethod}
+                  {order.isDemoPayment && ' (simulated — no real charge)'}
+                </dd>
               </div>
               <div className="flex justify-between gap-6">
                 <dt className="text-fog">Payment status</dt>

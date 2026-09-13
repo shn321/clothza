@@ -33,6 +33,10 @@ function toDocument(p) {
     isNewArrival: Boolean(p.isNewArrival),
     isBestSeller: Boolean(p.isBestSeller),
   }
+  /* NOTE: isPublished is intentionally NOT in $set — it uses
+     $setOnInsert below so re-running the seed never overrides an
+     admin's publish/unpublish choice. Admin-created products (slugs
+     outside the catalog) are never touched by slug-keyed upserts. */
 }
 
 function validate(p) {
@@ -81,7 +85,7 @@ async function seed() {
   const ops = PRODUCTS.map((p) => ({
     updateOne: {
       filter: { slug: String(p.slug).toLowerCase().trim() },
-      update: { $set: toDocument(p) },
+      update: { $set: toDocument(p), $setOnInsert: { isPublished: true } },
       upsert: true,
     },
   }))

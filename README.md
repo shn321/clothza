@@ -189,11 +189,18 @@ npm run build      # production bundle
 Seed the catalog with `npm run seed:products` (from `server/`), then
 register, and promote yourself with `node src/scripts/makeAdmin.js <email>`.
 
+> **Troubleshooting: shop shows 0 products / "Could not reach the
+> CLOTHZA server".** The storefront needs the API running too — start
+> **both** commands above in two terminals. Quick check:
+> `GET http://localhost:5000/api/health` must return 200. The frontend
+> reads the backend URL only from `client/.env` (`VITE_API_URL`); restart
+> `npm run dev` in `client/` after creating or changing that file.
+
 ## Production Deployment
 
 See **[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)** for the full checklist:
 frontend/backend hosting, MongoDB Atlas, environment variables, CORS,
-Razorpay production credentials and webhooks, SMTP, health checks, HTTPS,
+demo-payment notes, SMTP, health checks, HTTPS,
 domains and Git secret safety.
 
 ## Security Notes

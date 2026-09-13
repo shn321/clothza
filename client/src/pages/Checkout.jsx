@@ -5,8 +5,7 @@ import { useCart } from '../context/CartContext.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
 import { useNotifications } from '../context/NotificationContext.jsx'
 import { formatINR } from '../data/home.js'
-import { createOrder, createRazorpayOrder, markRazorpayFailed, toConfirmationOrder, validateCoupon, verifyRazorpayPayment } from '../lib/api.js'
-import { loadRazorpayCheckout, openRazorpayCheckout } from '../lib/razorpay.js'
+import { confirmDemoPayment, createDemoSession, createOrder, failDemoPayment, toConfirmationOrder, validateCoupon } from '../lib/api.js'
 import {
   COUNTRIES,
   DELIVERY_METHODS,
@@ -16,11 +15,8 @@ import {
   isValidPaymentMethod,
   orderTotals,
   saveLastOrder,
-  buildSafeOrder,
-  validateCardPayment,
   validateCustomer,
   validateShipping,
-  validateUpiPayment,
 } from '../utils/checkout.js'
 
 const ERROR_TO_ID = {
@@ -33,11 +29,6 @@ const ERROR_TO_ID = {
   state: 'co-state',
   pin: 'co-pin',
   country: 'co-country',
-  cardName: 'co-cardName',
-  cardNumber: 'co-cardNumber',
-  expiry: 'co-expiry',
-  cvv: 'co-cvv',
-  upiId: 'co-upiId',
 }
 
 function Field({
@@ -105,23 +96,28 @@ function Checkout() {
   })
   const [delivery, setDelivery] = useState('standard')
   const [payment, setPayment] = useState('cod')
-  const [card, setCard] = useState({ cardName: '', cardNumber: '', expiry: '', cvv: '' })
-  const [upi, setUpi] = useState({ upiId: '' })
   const [touched, setTouched] = useState({})
   const [submittedOnce, setSubmittedOnce] = useState(false)
   const [formError, setFormError] = useState('')
   const [payStatus, setPayStatus] = useState('')
   const [submitting, setSubmitting] = useState(false)
+  /* Step 30 — simulated demo online payment. The server quotes the
+     payable amount (demoQuote, from MongoDB prices); the "Pay" step is
+     a frontend simulation, and the server confirms the paid order.
+     demoStage: idle → ready → processing → done. */
+  const [demoQuote, setDemoQuote] = useState(null)
+  const [demoStage, setDemoStage] = useState('idle')
+  const placedRef = useRef(false)
+  const demoTimersRef = useRef([])
+  /* One idempotency key per checkout attempt — refresh / retry /
+     double-submit returns the original order instead of a duplicate. */
+  const idempotencyRef = useRef(null)
   /* Step 18 — coupons (authenticated shoppers only; the server recomputes
      the discount at order time, so this display amount is indicative). */
   const [couponInput, setCouponInput] = useState('')
   const [coupon, setCoupon] = useState(null)
   const [couponError, setCouponError] = useState('')
   const [couponApplying, setCouponApplying] = useState(false)
-  const placedRef = useRef(false)
-  const timerRef = useRef(null)
-
-  useEffect(() => () => window.clearTimeout(timerRef.current), [])
 
   /* Revalidate the applied coupon when the bag changes so the displayed
      discount never goes stale. A coupon that no longer applies is
@@ -166,8 +162,37 @@ function Checkout() {
 
   const customerErrors = validateCustomer(customer)
   const shippingErrors = validateShipping(shipping)
-  const paymentErrors =
-    payment === 'card' ? validateCardPayment(card) : payment === 'upi' ? validateUpiPayment(upi) : {}
+
+  /* One idempotency key per checkout attempt. A changed bag starts a
+     fresh attempt (old quotes/keys are discarded). */
+  function getIdempotencyKey() {
+    if (!idempotencyRef.current) {
+      try {
+        idempotencyRef.current =
+          window.crypto?.randomUUID?.() || `clz-${Date.now()}-${Math.random().toString(36).slice(2)}`
+      } catch {
+        idempotencyRef.current = `clz-${Date.now()}-${Math.random().toString(36).slice(2)}`
+      }
+    }
+    return idempotencyRef.current
+  }
+
+  const bagFingerprint = items.map((l) => `${l.key}:${l.qty}:${l.price}`).join('|')
+  useEffect(() => {
+    idempotencyRef.current = null
+    setDemoQuote(null)
+    setDemoStage('idle')
+    /* Intentionally keyed on the derived bag fingerprint only: a changed
+       bag starts a fresh checkout attempt. */
+  }, [bagFingerprint])
+
+  /* Demo simulation timers are cleaned up on unmount. */
+  useEffect(() => {
+    const timers = demoTimersRef.current
+    return () => {
+      timers.forEach((t) => window.clearTimeout(t))
+    }
+  }, [])
 
   const totals = (() => {
     const base = orderTotals(subtotal, delivery)
@@ -222,77 +247,93 @@ function Checkout() {
     )
   }
 
-  // Razorpay TEST MODE flow for signed-in shoppers paying online.
-  // Guards stay armed while the modal/verification is in flight, so a
-  // double-click can never double-charge or double-order. Any failure
-  // resets the guards, keeps the bag intact and allows a safe retry.
-  async function handleOnlinePayment() {
+  // Simulated demo online payment (Step 30 — portfolio only, no real
+  // gateway). Step 1 (here): the server quotes the payable amount from
+  // MongoDB prices. Step 2 (handleDemoPay): a short frontend simulation,
+  // then the server confirms the paid order. Guards stay armed while a
+  // quote/confirmation is in flight, so a double-click can never create
+  // two sessions or two orders. Any failure resets the guards, keeps the
+  // bag intact and allows a safe retry.
+  async function handleDemoQuote() {
     const resetForRetry = (message) => {
       placedRef.current = false
       setSubmitting(false)
+      setDemoStage('idle')
+      setDemoQuote(null)
       setPayStatus('')
       setFormError(message)
     }
 
-    let session
     try {
-      setPayStatus('Starting secure payment…')
-      session = await createRazorpayOrder({
+      setPayStatus('Requesting demo payment amount…')
+      const quote = await createDemoSession({
         deliveryMethod: delivery,
-        paymentMethod: payment,
         customer,
         shipping,
         ...(coupon?.coupon?.code ? { couponCode: coupon.coupon.code } : {}),
       })
-      await loadRazorpayCheckout()
+      setDemoQuote(quote)
+      setDemoStage('ready')
+      setSubmitting(false)
+      setPayStatus('')
     } catch (err) {
-      resetForRetry(err?.message || 'Could not start online payment. Please try again or use Cash on Delivery.')
-      return
+      resetForRetry(err?.message || 'Could not start the demo payment. Please try again or use Cash on Delivery.')
     }
+  }
 
-    const fullName = `${customer.firstName} ${customer.lastName}`.trim()
-    setPayStatus('Waiting for payment…')
-    try {
-      openRazorpayCheckout({
-        keyId: session.keyId,
-        amountPaise: session.amountPaise,
-        currency: session.currency,
-        razorpayOrderId: session.razorpayOrderId,
-        prefill: { name: fullName, email: customer.email, contact: customer.phone },
-        handlers: {
-          onSuccess: async (response) => {
-            setPayStatus('Verifying payment…')
-            try {
-              const order = await verifyRazorpayPayment({
-                razorpayOrderId: response?.razorpay_order_id,
-                razorpayPaymentId: response?.razorpay_payment_id,
-                razorpaySignature: response?.razorpay_signature,
-                customer,
-                shipping,
-              })
-              const confirmation = toConfirmationOrder(order)
-              if (confirmation) saveLastOrder(confirmation)
-              await clearCart()
-              refreshNotifications()
-              navigate('/order-confirmation')
-            } catch (err) {
-              resetForRetry(err?.message || 'Payment verification failed. Your bag is saved — please try again.')
-            }
-          },
-          onDismiss: () => {
-            markRazorpayFailed(session.razorpayOrderId)
-            resetForRetry('Payment was cancelled before completion. Your bag is saved — try again when ready.')
-          },
-          onError: (gatewayError) => {
-            markRazorpayFailed(session.razorpayOrderId)
-            const detail = gatewayError?.description ? ` ${gatewayError.description}` : ''
-            resetForRetry(`Payment failed.${detail} Your bag is saved — please try again or use Cash on Delivery.`)
-          },
-        },
-      })
-    } catch {
-      resetForRetry('Could not open the payment window. Please try again or use Cash on Delivery.')
-    }
+  // Step 2: simulated "Pay ₹amount (Demo)" → server confirmation.
+  function handleDemoPay() {
+    if (!demoQuote || demoStage !== 'ready') return
+    setDemoStage('processing')
+    setFormError('')
+    const amountLabel = formatINR(demoQuote.total)
+    const steps = [
+      'Contacting demo bank…',
+      `Authorising ${amountLabel} (simulated)…`,
+      'Confirming demo payment…',
+    ]
+    steps.forEach((message, i) => {
+      demoTimersRef.current.push(
+        window.setTimeout(() => setPayStatus(message), i * 700),
+      )
+    })
+    demoTimersRef.current.push(
+      window.setTimeout(async () => {
+        try {
+          const order = await confirmDemoPayment({
+            demoSessionId: demoQuote.demoSessionId,
+            customer,
+            shipping,
+            idempotencyKey: getIdempotencyKey(),
+          })
+          const confirmation = toConfirmationOrder(order)
+          if (confirmation) saveLastOrder(confirmation)
+          await clearCart()
+          refreshNotifications()
+          setDemoStage('done')
+          navigate('/order-confirmation')
+        } catch (err) {
+          placedRef.current = false
+          setSubmitting(false)
+          setDemoStage('idle')
+          setDemoQuote(null)
+          setPayStatus('')
+          setFormError(err?.message || 'Demo payment failed. Your bag is saved — please try again.')
+        }
+      }, steps.length * 700 + 400),
+    )
+  }
+
+  function handleDemoCancel() {
+    if (demoQuote) failDemoPayment(demoQuote.demoSessionId)
+    demoTimersRef.current.forEach((t) => window.clearTimeout(t))
+    demoTimersRef.current = []
+    placedRef.current = false
+    setSubmitting(false)
+    setDemoQuote(null)
+    setDemoStage('idle')
+    setPayStatus('')
+    setFormError('Demo payment was cancelled before completion. Your bag is saved — try again when ready.')
   }
 
   const handleSubmit = (e) => {
@@ -302,7 +343,7 @@ function Checkout() {
     setFormError('')
     setPayStatus('')
 
-    const merged = { ...customerErrors, ...shippingErrors, ...paymentErrors }
+    const merged = { ...customerErrors, ...shippingErrors }
     if (
       Object.keys(merged).length > 0 ||
       !isValidDeliveryMethod(delivery) ||
@@ -325,12 +366,15 @@ function Checkout() {
     // Authenticated shoppers place a persistent MongoDB order. Totals,
     // prices and stock are validated on the server; the cart is cleared
     // there only after the order exists.
+    // Note: this page sits behind <ProtectedRoute>, so `user` is always
+    // set here — guests are redirected to /login (cart preserved in
+    // localStorage and merged on sign-in) and return here afterwards.
     if (user) {
-      // Online payment (TEST MODE): server creates the gateway order,
-      // the Razorpay modal collects sensitive details, and the signed
-      // response is verified server-side before any order is created.
-      if (payment === 'card' || payment === 'upi') {
-        handleOnlinePayment()
+      // Demo online payment: the server quotes the amount first; the
+      // shopper then simulates paying it (handleDemoPay), and the
+      // server confirms the paid order. No real gateway is involved.
+      if (payment === 'demo_online') {
+        handleDemoQuote()
         return
       }
       createOrder({
@@ -339,6 +383,7 @@ function Checkout() {
         deliveryMethod: delivery,
         paymentMethod: payment,
         ...(coupon?.coupon?.code ? { couponCode: coupon.coupon.code } : {}),
+        idempotencyKey: getIdempotencyKey(),
       })
         .then((order) => {
           const confirmation = toConfirmationOrder(order)
@@ -356,21 +401,6 @@ function Checkout() {
         })
       return
     }
-
-    // Guest demo flow — unchanged: local snapshot, local cart clear.
-    timerRef.current = window.setTimeout(() => {
-      const order = buildSafeOrder({
-        items,
-        subtotal,
-        deliveryId: delivery,
-        customer,
-        shipping,
-        paymentId: payment,
-      })
-      saveLastOrder(order)
-      clearCart()
-      navigate('/order-confirmation')
-    }, 900)
   }
 
   return (
@@ -615,7 +645,7 @@ function Checkout() {
                   return (
                     <label
                       key={m.id}
-                      className={`flex cursor-pointer items-center gap-3 rounded-[4px] border p-4 transition-colors duration-200 ${
+                      className={`flex cursor-pointer items-start gap-3 rounded-[4px] border p-4 transition-colors duration-200 ${
                         active ? 'border-charcoal bg-porcelain' : 'border-linen bg-porcelain hover:border-charcoal'
                       }`}
                     >
@@ -625,96 +655,81 @@ function Checkout() {
                         value={m.id}
                         checked={active}
                         onChange={(e) => setPayment(e.target.value)}
-                        className="field-radio"
+                        className="field-radio mt-1"
                       />
-                      <span className="text-[0.9375rem] font-medium">{m.label}</span>
+                      <span className="flex flex-1 flex-col">
+                        <span className="text-[0.9375rem] font-medium">
+                          {m.label}{' '}
+                          {m.id === 'demo_online' && (
+                            <span className="ml-1 inline-flex items-center rounded-full border border-bronze/40 bg-cream px-2 py-0.5 align-middle text-[11px] font-medium uppercase tracking-wide text-bronze-deep">
+                              Demo · Test only
+                            </span>
+                          )}
+                        </span>
+                        {m.hint && <span className="type-small mt-1">{m.hint}</span>}
+                        {m.id === 'demo_online' && (
+                          <span className="type-small mt-1">
+                            A simulated payment screen follows — no real gateway, no real charge, no card details.
+                          </span>
+                        )}
+                      </span>
                     </label>
                   )
                 })}
               </fieldset>
 
-              {payment === 'card' && (
-                <div className="mt-4 grid gap-4 rounded-[4px] border border-linen bg-porcelain p-4 sm:grid-cols-2 sm:p-5">
-                  <div className="sm:col-span-2">
-                    <Field
-                      id="co-cardName"
-                      name="cardName"
-                      label="Cardholder name"
-                      type="text"
-                      autoComplete="cc-name"
-                      placeholder="AARAV SHARMA"
-                      value={card.cardName}
-                      onChange={setIn(setCard)}
-                      onBlur={markTouched}
-                      error={paymentErrors.cardName}
-                      showError={show('cardName')}
-                    />
-                  </div>
-                  <div className="sm:col-span-2">
-                    <Field
-                      id="co-cardNumber"
-                      name="cardNumber"
-                      label="Card number"
-                      type="text"
-                      autoComplete="cc-number"
-                      inputMode="numeric"
-                      placeholder="1234 5678 9012 3456"
-                      hint="Demo only — use a test number, never a real card."
-                      value={card.cardNumber}
-                      onChange={setIn(setCard)}
-                      onBlur={markTouched}
-                      error={paymentErrors.cardNumber}
-                      showError={show('cardNumber')}
-                    />
-                  </div>
-                  <Field
-                    id="co-expiry"
-                    name="expiry"
-                    label="Expiry date"
-                    type="text"
-                    autoComplete="cc-exp"
-                    inputMode="numeric"
-                    placeholder="MM/YY"
-                    value={card.expiry}
-                    onChange={setIn(setCard)}
-                    onBlur={markTouched}
-                    error={paymentErrors.expiry}
-                    showError={show('expiry')}
-                  />
-                  <Field
-                    id="co-cvv"
-                    name="cvv"
-                    label="CVV"
-                    type="password"
-                    autoComplete="off"
-                    inputMode="numeric"
-                    placeholder="123"
-                    hint="Demo only — never stored."
-                    value={card.cvv}
-                    onChange={setIn(setCard)}
-                    onBlur={markTouched}
-                    error={paymentErrors.cvv}
-                    showError={show('cvv')}
-                  />
-                </div>
-              )}
-
-              {payment === 'upi' && (
-                <div className="mt-4 rounded-[4px] border border-linen bg-porcelain p-4 sm:p-5">
-                  <Field
-                    id="co-upiId"
-                    name="upiId"
-                    label="UPI ID"
-                    type="text"
-                    autoComplete="off"
-                    inputMode="email"
-                    placeholder="name@bank"
-                    value={upi.upiId}
-                    onChange={setIn(setUpi)}
-                    onBlur={markTouched}
-                    error={paymentErrors.upiId}
-                    showError={show('upiId')}
-                  />
+              {payment === 'demo_online' && demoStage !== 'idle' && demoQuote && (
+                <div
+                  className="mt-4 rounded-[4px] border border-bronze/40 bg-cream p-4 sm:p-5"
+                  role="status"
+                  aria-label="Demo payment"
+                >
+                  <p className="type-label">Demo payment · Test only</p>
+                  <p className="type-price mt-2 text-2xl" aria-live="polite">
+                    {formatINR(demoQuote.total)}
+                  </p>
+                  <p className="type-small mt-1">
+                    Amount verified with the server — no real money will move.
+                  </p>
+                  {demoStage === 'ready' && (
+                    <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+                      <button
+                        type="button"
+                        onClick={handleDemoPay}
+                        className="btn btn-primary flex-1"
+                      >
+                        <Lock size={16} strokeWidth={1.5} aria-hidden="true" />
+                        Pay {formatINR(demoQuote.total)} (Demo)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleDemoCancel}
+                        className="btn btn-secondary"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  )}
+                  {demoStage === 'processing' && (
+                    <div className="mt-4">
+                      <p className="type-small" aria-live="polite">
+                        {payStatus || 'Processing demo payment…'}
+                      </p>
+                      <div
+                        className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-linen"
+                        aria-hidden="true"
+                      >
+                        <div className="demo-progress h-full rounded-full bg-bronze" />
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleDemoCancel}
+                        className="btn btn-secondary mt-3"
+                      >
+                        Cancel demo payment
+                      </button>
+                    </div>
+                  )}
                 </div>
               )}
             </section>
@@ -731,9 +746,21 @@ function Checkout() {
             )}
 
             <div>
-              <button type="submit" disabled={submitting} className="btn btn-primary w-full sm:w-auto sm:min-w-64">
+              <button
+                type="submit"
+                disabled={submitting || (payment === 'demo_online' && demoStage !== 'idle')}
+                className="btn btn-primary w-full sm:w-auto sm:min-w-64"
+              >
                 <Lock size={16} strokeWidth={1.5} aria-hidden="true" />
-                {submitting ? 'Placing Your Order…' : `Place Order · ${formatINR(totals.total)}`}
+                {submitting
+                  ? payment === 'demo_online'
+                    ? 'Requesting Demo Amount…'
+                    : 'Placing Your Order…'
+                  : payment === 'demo_online' && demoStage === 'idle'
+                    ? `Continue to Demo Payment · ${formatINR(totals.total)}`
+                    : payment === 'demo_online'
+                      ? 'Demo Payment In Progress…'
+                      : `Place Order · ${formatINR(totals.total)}`}
               </button>
               <p className="type-small mt-2">
                 {deliveryMethod.label} · {deliveryMethod.eta}. Demo checkout — no real
@@ -774,11 +801,10 @@ function Checkout() {
                   </li>
                 ))}
               </ul>
-              {/* Coupon — authenticated shoppers only; guests keep the
-                  unchanged demo flow with a sign-in hint. */}
+              {/* Coupon — checkout requires sign-in, so every shopper
+                  here is authenticated. */}
               <div className="mt-5 border-t border-linen pt-4">
-                {user ? (
-                  coupon ? (
+                {coupon ? (
                     <div className="flex items-center justify-between gap-3 rounded-[3px] border border-linen bg-ivory px-3 py-2.5 text-sm">
                       <span>
                         <span className="font-medium">{coupon.coupon.code}</span>{' '}
@@ -825,16 +851,7 @@ function Checkout() {
                         </p>
                       )}
                     </form>
-                  )
-                ) : (
-                  <p className="type-small">
-                    Have a coupon?{' '}
-                    <Link to="/login" className="font-medium underline underline-offset-2">
-                      Sign in
-                    </Link>{' '}
-                    to apply it at checkout.
-                  </p>
-                )}
+                  )}
                 {couponError && coupon && (
                   <p role="alert" className="mt-2 text-sm text-red-800">
                     {couponError}

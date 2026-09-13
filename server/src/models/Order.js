@@ -8,8 +8,13 @@ import mongoose from 'mongoose'
    Field spellings (`colour`, `qty`) match the cart/checkout shapes. */
 
 export const ORDER_STATUSES = ['pending', 'confirmed', 'processing', 'shipped', 'delivered', 'cancelled']
-export const PAYMENT_METHODS = ['cod', 'upi', 'card']
-export const PAYMENT_STATUSES = ['pending', 'paid', 'failed', 'refunded']
+/* Step 30 — portfolio demo payments. `cod` = Cash on Delivery,
+   `demo_online` = simulated Online Payment (Demo, no real gateway).
+   `upi` / `card` remain accepted for backwards compatibility with the
+   earlier Razorpay TEST MODE flow; the checkout UI offers only the
+   two Step-30 methods. Lowercase convention is kept throughout. */
+export const PAYMENT_METHODS = ['cod', 'demo_online', 'upi', 'card']
+export const PAYMENT_STATUSES = ['pending', 'paid', 'failed', 'not_applicable', 'refunded']
 /* Shipped / delivered orders are final and can never be cancelled. */
 export const CANCELLABLE_STATUSES = ['pending', 'confirmed', 'processing']
 
@@ -128,10 +133,12 @@ const orderSchema = new mongoose.Schema(
     /* No real gateway yet — nothing is ever marked paid in this step. */
     paymentStatus: { type: String, enum: PAYMENT_STATUSES, default: 'pending' },
     /* Step 15 — Razorpay TEST MODE. Card/UPI details never touch this
-       model; only gateway references and derived statuses. */
+       model; only gateway references and derived statuses.
+       Step 30 — `demo` marks simulated demo-online payments (no real
+       gateway, no real money). */
     paymentProvider: {
       type: String,
-      enum: ['cod', 'razorpay'],
+      enum: ['cod', 'razorpay', 'demo'],
       default: 'cod',
       index: true,
     },
@@ -152,12 +159,26 @@ const orderSchema = new mongoose.Schema(
     paidAt: { type: Date, default: null },
     orderStatus: { type: String, enum: ORDER_STATUSES, default: 'pending', index: true },
     cancelledAt: { type: Date, default: null },
+    /* Step 30 — client-generated idempotency key for POST /api/orders
+       (also sent as X-Idempotency-Key). Same user + same key returns
+       the original order instead of creating a duplicate, so refresh /
+       retry / double-submit can never double-charge stock. Absent for
+       key-less orders, which the partial index below skips. */
+    idempotencyKey: { type: String, default: undefined, trim: true },
   },
   { timestamps: true },
 )
 
 /* Newest-first listing per user. */
 orderSchema.index({ user: 1, createdAt: -1 })
+/* Step 30 — one order per (user, idempotencyKey). A PARTIAL index
+   (not sparse: sparse still indexes explicit nulls, which would allow
+   only one key-less order per user) covers only documents carrying a
+   string key, so key-less orders never collide. */
+orderSchema.index(
+  { user: 1, idempotencyKey: 1 },
+  { unique: true, partialFilterExpression: { idempotencyKey: { $type: 'string' } } },
+)
 
 const Order = mongoose.models.Order || mongoose.model('Order', orderSchema)
 

@@ -37,7 +37,12 @@ export const DELIVERY_META = {
   standard: { label: 'Standard Delivery', eta: '5–7 business days' },
   express: { label: 'Express Delivery', eta: '2–3 business days' },
 }
-const PAYMENT_LABELS = { cod: 'Cash on Delivery', card: 'Credit / Debit Card', upi: 'UPI' }
+const PAYMENT_LABELS = {
+  cod: 'Cash on Delivery',
+  demo_online: 'Online Payment (Demo)',
+  card: 'Credit / Debit Card',
+  upi: 'UPI',
+}
 const DEFAULT_LIST_LIMIT = 20
 const MAX_LIST_LIMIT = 50
 
@@ -99,6 +104,9 @@ export function serializeOrder(doc) {
     paymentMethodLabel: PAYMENT_LABELS[doc.paymentMethod] || doc.paymentMethod,
     paymentStatus: doc.paymentStatus,
     paymentProvider: doc.paymentProvider || 'cod',
+    /* Step 30 — explicit DEMO marker so every UI can badge simulated
+       payments without string-matching labels. */
+    isDemoPayment: (doc.paymentProvider || '') === 'demo' || doc.paymentMethod === 'demo_online',
     orderStatus: doc.orderStatus,
     createdAt: doc.createdAt,
     ...(doc.paidAt ? { paidAt: doc.paidAt } : {}),
@@ -131,7 +139,21 @@ export async function createOrderDoc(doc) {
     try {
       return await Order.create({ ...doc, orderNumber: makeOrderNumber() })
     } catch (err) {
-      if (err && err.code === 11000) continue
+      if (err && err.code === 11000) {
+        /* Step 30 — a duplicate (user, idempotencyKey) means a retried
+           submission raced the original: return the existing order
+           instead of failing or double-creating. orderNumber collisions
+           fall through to the retry below. */
+        if (doc.idempotencyKey && doc.user) {
+          const dup = await Order.findOne({ user: doc.user, idempotencyKey: doc.idempotencyKey })
+          if (dup) {
+            const replay = new Error('__IDEMPOTENT_REPLAY__')
+            replay.replayOrder = dup
+            throw replay
+          }
+        }
+        continue
+      }
       throw err
     }
   }
@@ -139,8 +161,9 @@ export async function createOrderDoc(doc) {
 }
 
 /* Best-effort stock restoration (compensation for a failed order or a
-   cancellation). Never throws — callers must not fail because of it. */
-async function restoreStock(lines) {
+   cancellation). Never throws — callers must not fail because of it.
+   Exported for the admin cancel path, which restores identically. */
+export async function restoreStock(lines) {
   for (const { productId, qty } of lines) {
     try {
       await Product.updateOne({ _id: productId }, { $inc: { stock: qty } })
@@ -149,6 +172,17 @@ async function restoreStock(lines) {
       // but a failed restore must never break the response path.
     }
   }
+}
+
+/* Step 30 — accept the canonical lowercase ids plus the common
+   uppercase aliases the spec uses (`COD`, `DEMO_ONLINE`). Anything
+   else falls through to the PAYMENT_METHODS check (legacy `card` /
+   `upi` still pass; unknown values are rejected). */
+export function normalizePaymentMethod(raw) {
+  const v = str(raw).toLowerCase().replace(/-/g, '_')
+  if (v === 'cod' || v === 'cash_on_delivery' || v === 'cash' || v === 'cashondelivery') return 'cod'
+  if (v === 'demo_online' || v === 'demo' || v === 'online' || v === 'demo_payment') return 'demo_online'
+  return v
 }
 
 /* ---------- handlers ---------- */
@@ -160,9 +194,29 @@ export async function createOrder(req, res, next) {
     if (!DELIVERY_IDS.includes(deliveryId)) {
       return res.status(400).json({ success: false, message: 'Invalid delivery method.' })
     }
-    const paymentMethod = str(req.body?.paymentMethod || req.body?.payment || req.body?.paymentId)
+    const paymentMethod = normalizePaymentMethod(
+      req.body?.paymentMethod || req.body?.payment || req.body?.paymentId,
+    )
     if (!PAYMENT_METHODS.includes(paymentMethod)) {
       return res.status(400).json({ success: false, message: 'Invalid payment method.' })
+    }
+    /* Step 30 — idempotency: the client sends one key per checkout
+       attempt (body or X-Idempotency-Key header). A repeated submission
+       with the same key returns the ORIGINAL order (200 + replay:true)
+       instead of creating a duplicate or decrementing stock twice.
+       NOTE: totals / paymentStatus from the body are never trusted —
+       they are not even read; totals come from MongoDB below. */
+    const idempotencyKey = str(
+      req.body?.idempotencyKey || req.headers['x-idempotency-key'],
+    ).slice(0, 128) || undefined
+    if (idempotencyKey) {
+      const prior = await Order.findOne({ user: req.user._id, idempotencyKey })
+      if (prior) {
+        return res.status(200).json({
+          success: true,
+          data: { order: serializeOrder(prior), replay: true },
+        })
+      }
     }
     let customer
     let shippingAddress
@@ -270,10 +324,15 @@ export async function createOrder(req, res, next) {
 
     // 13. Create the order; restore stock AND release the coupon claim
     // if this fails, so a failed order never consumes coupon usage.
+    // Step 30 — DEMO_ONLINE orders are marked paid HERE on the server
+    // (paymentProvider `demo`, paidAt now). The client only chooses the
+    // method; it can never set paymentStatus itself. COD stays pending.
+    const isDemoOnline = paymentMethod === 'demo_online'
     let order
     try {
       order = await createOrderDoc({
         user: req.user._id,
+        ...(idempotencyKey ? { idempotencyKey } : {}),
         items: lines.map(({ product, qty, size, colour }) => ({
           product: product._id,
           productId: product.legacyId || product.slug,
@@ -291,10 +350,19 @@ export async function createOrder(req, res, next) {
         ...totals,
         ...(couponSnapshot ? { coupon: couponSnapshot } : {}),
         paymentMethod,
-        paymentStatus: 'pending',
+        paymentStatus: isDemoOnline ? 'paid' : 'pending',
+        paymentProvider: isDemoOnline ? 'demo' : 'cod',
+        ...(isDemoOnline ? { paidAt: new Date() } : {}),
         orderStatus: 'pending',
       })
     } catch (err) {
+      /* A raced duplicate submission resolved to the original order. */
+      if (err && err.message === '__IDEMPOTENT_REPLAY__' && err.replayOrder) {
+        return res.status(200).json({
+          success: true,
+          data: { order: serializeOrder(err.replayOrder), replay: true },
+        })
+      }
       await restoreStock(decremented)
       if (coupon) await releaseCouponUsage(coupon._id, req.user._id)
       return next(err)

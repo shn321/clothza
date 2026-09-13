@@ -25,7 +25,7 @@ export class ApiError extends Error {
   }
 }
 
-async function request(path, { signal, method = 'GET', body, auth = false } = {}) {
+async function request(path, { signal, method = 'GET', body, auth = false, headers = {} } = {}) {
   const url = `${getApiBase()}${path}`
   // Session routes (auth + database cart/wishlist/orders) use the
   // HTTP-only cookie, so credentials must be included. Product routes
@@ -51,8 +51,10 @@ async function request(path, { signal, method = 'GET', body, auth = false } = {}
       // be included. Product routes are public and stay credential-free.
       ...(needsCredentials ? { credentials: 'include' } : {}),
       ...(body !== undefined
-        ? { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
-        : {}),
+        ? { headers: { 'Content-Type': 'application/json', ...headers }, body: JSON.stringify(body) }
+        : Object.keys(headers).length > 0
+          ? { headers }
+          : {}),
     })
   } catch (err) {
     if (err?.name === 'AbortError') throw err
@@ -102,6 +104,7 @@ export function normalizeProduct(doc) {
     isFeatured: Boolean(doc.isFeatured),
     isBestSeller: Boolean(doc.isBestSeller),
     gender: doc.gender,
+    isPublished: doc.isPublished !== false,
   }
 }
 
@@ -324,14 +327,19 @@ function isSafeOrder(o) {
   return Boolean(o && typeof o === 'object' && typeof o.orderNumber === 'string' && Array.isArray(o.items))
 }
 
-/* POST /api/orders — { customer, shipping, deliveryMethod, paymentMethod, couponCode? }.
-   Totals are computed by the server; any totals sent are ignored. */
-export async function createOrder({ customer, shipping, deliveryMethod, paymentMethod, couponCode }) {
+/* POST /api/orders — { customer, shipping, deliveryMethod, paymentMethod, couponCode?, idempotencyKey? }.
+   Totals are computed by the server; any totals sent are ignored.
+   The idempotency key (one per checkout attempt) makes refresh /
+   retry / double-submit return the original order instead of a
+   duplicate — the confirmation page can be reloaded safely. */
+export async function createOrder({ customer, shipping, deliveryMethod, paymentMethod, couponCode, idempotencyKey }) {
   const payload = { customer, shipping, deliveryMethod, paymentMethod }
   if (couponCode) payload.couponCode = couponCode
+  if (idempotencyKey) payload.idempotencyKey = idempotencyKey
   const body = await request('/orders', {
     method: 'POST',
     body: payload,
+    ...(idempotencyKey ? { headers: { 'X-Idempotency-Key': idempotencyKey } } : {}),
   })
   const order = body?.data?.order
   if (!isSafeOrder(order)) throw new ApiError('Could not place your order. Please try again.', 500)
@@ -393,6 +401,8 @@ export function toConfirmationOrder(order) {  if (!isSafeOrder(order)) return nu
     payment: {
       id: order.paymentMethod,
       label: order.paymentMethodLabel || order.paymentMethod,
+      status: order.paymentStatus || '',
+      isDemo: Boolean(order.isDemoPayment),
     },
     items: order.items,
     subtotal: order.subtotal,
@@ -476,6 +486,61 @@ export async function markRazorpayFailed(razorpayOrderId) {
   }
 }
 
+/* ---- Simulated demo online payment (Step 30, portfolio only) ----
+   No real gateway: the server quotes the payable total from MongoDB
+   prices, the UI simulates the "Pay" step, and the server confirms the
+   paid order. Amounts always originate server-side. */
+
+function isDemoQuote(q) {
+  return Boolean(
+    q && typeof q === 'object' &&
+    typeof q.demoSessionId === 'string' && q.demoSessionId &&
+    typeof q.total === 'number' && q.total >= 0,
+  )
+}
+
+/* POST /api/payments/demo/order — { deliveryMethod, customer?, shipping?, couponCode? } */
+export async function createDemoSession({ deliveryMethod, customer, shipping, couponCode }) {
+  const payload = { deliveryMethod }
+  if (customer !== undefined) payload.customer = customer
+  if (shipping !== undefined) payload.shipping = shipping
+  if (couponCode) payload.couponCode = couponCode
+  const body = await request('/payments/demo/order', { method: 'POST', body: payload })
+  const quote = body?.data
+  if (!isDemoQuote(quote)) {
+    throw new ApiError('Could not start the demo payment. Please try again.', 502)
+  }
+  return quote
+}
+
+/* POST /api/payments/demo/confirm — { demoSessionId, customer, shipping, idempotencyKey? } */
+export async function confirmDemoPayment({ demoSessionId, customer, shipping, idempotencyKey }) {
+  const payload = { demoSessionId, customer, shipping }
+  if (idempotencyKey) payload.idempotencyKey = idempotencyKey
+  const body = await request('/payments/demo/confirm', {
+    method: 'POST',
+    body: payload,
+    ...(idempotencyKey ? { headers: { 'X-Idempotency-Key': idempotencyKey } } : {}),
+  })
+  const order = body?.data?.order
+  if (!order || typeof order !== 'object' || typeof order.orderNumber !== 'string') {
+    throw new ApiError('Demo payment confirmation failed.', 500)
+  }
+  return order
+}
+
+/* POST /api/payments/demo/fail — close the session after a cancel/failure (best effort). */
+export async function failDemoPayment(demoSessionId) {
+  try {
+    await request('/payments/demo/fail', {
+      method: 'POST',
+      body: { demoSessionId },
+    })
+  } catch {
+    // Failure bookkeeping must never block retry.
+  }
+}
+
 /* ---- Admin (Step 16) — session cookie + server-enforced admin role.
    The backend returns 401/403 for unauthorized callers; these helpers
    only surface the safe payloads. ---- */
@@ -543,9 +608,10 @@ export async function updateAdminProduct(id, payload) {
   return body.data
 }
 
-/* DELETE /api/admin/products/:id */
-export async function deleteAdminProduct(id) {
-  await request(`/admin/products/${encodeURIComponent(id)}`, { method: 'DELETE' })
+/* DELETE /api/admin/products/:id — 409 while referenced unless force. */
+export async function deleteAdminProduct(id, { force = false } = {}) {
+  const suffix = force ? '?force=true' : ''
+  await request(`/admin/products/${encodeURIComponent(id)}${suffix}`, { method: 'DELETE' })
 }
 
 /* GET /api/admin/orders */
@@ -757,4 +823,88 @@ export async function deleteNotification(id) {
 export async function clearNotifications() {
   const body = await request('/notifications', { method: 'DELETE' })
   return { deleted: Number(body?.data?.deleted) || 0 }
+}
+
+/* ---- CMS content (public reads; admin writes) ----
+   Public GETs are credential-free like product browsing. Admin writes
+   go through /api/admin (session cookie + server-enforced admin role). */
+
+/* GET /api/content/:key — public, published content. Returns the raw
+   content object or null when unreachable (callers use safe fallbacks). */
+export async function fetchPublicContent(key, { signal } = {}) {
+  const body = await request(`/content/${encodeURIComponent(key)}`, { signal })
+  const content = body?.data?.content
+  return content && typeof content === 'object' ? content : null
+}
+
+/* GET /api/content — public, all published sections as { key: content }. */
+export async function fetchAllPublicContent({ signal } = {}) {
+  const body = await request('/content', { signal })
+  const data = body?.data
+  return data && typeof data === 'object' ? data : {}
+}
+
+/* GET /api/admin/content — admin list with metadata. */
+export async function fetchAdminContents({ signal } = {}) {
+  const body = await request('/admin/content', { signal })
+  const data = body?.data
+  if (!Array.isArray(data)) throw new ApiError('Could not load content.', 500)
+  return data
+}
+
+/* GET /api/admin/content/:key — admin single section with metadata. */
+export async function fetchAdminContent(key, { signal } = {}) {
+  const body = await request(`/admin/content/${encodeURIComponent(key)}`, { signal })
+  if (!body?.data) throw new ApiError('Content not found.', 404)
+  return body.data
+}
+
+/* PUT /api/admin/content/:key — full replace after server validation. */
+export async function updateAdminContent(key, content, { isPublished } = {}) {
+  const payload = { content }
+  if (isPublished !== undefined) payload.isPublished = isPublished
+  const body = await request(`/admin/content/${encodeURIComponent(key)}`, {
+    method: 'PUT',
+    body: payload,
+  })
+  if (!body?.data) throw new ApiError('Could not save content.', 500)
+  return body.data
+}
+
+/* POST /api/admin/content/:key/reset — restore factory defaults. */
+export async function resetAdminContent(key) {
+  const body = await request(`/admin/content/${encodeURIComponent(key)}/reset`, {
+    method: 'POST',
+  })
+  if (!body?.data) throw new ApiError('Could not reset content.', 500)
+  return body.data
+}
+
+/* ---- CMS media library (admin-only) ---- */
+
+/* GET /api/admin/media — ?q=&page=&limit= */
+export async function fetchAdminMedia(params = {}, { signal } = {}) {
+  const body = await request(`/admin/media${adminQuery(params)}`, { signal })
+  const items = Array.isArray(body?.data?.items) ? body.data.items : []
+  return {
+    items,
+    pagination: body?.data?.pagination || { page: 1, limit: items.length, total: items.length, pages: 1 },
+    storage: body?.data?.storage || { provider: 'url', configured: false },
+  }
+}
+
+/* POST /api/admin/media — { url, altText?, filename?, folder? } */
+export async function uploadAdminMedia({ url, altText = '', filename = '', folder = 'clothza' }) {
+  const body = await request('/admin/media', {
+    method: 'POST',
+    body: { url, altText, filename, folder },
+  })
+  if (!body?.data?.id) throw new ApiError('Could not upload the image.', 500)
+  return body.data
+}
+
+/* DELETE /api/admin/media/:id — 409 while referenced unless force. */
+export async function deleteAdminMedia(id, { force = false } = {}) {
+  const suffix = force ? '?force=true' : ''
+  await request(`/admin/media/${encodeURIComponent(id)}${suffix}`, { method: 'DELETE' })
 }

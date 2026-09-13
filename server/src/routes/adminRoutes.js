@@ -29,6 +29,17 @@ import {
   listAdminCoupons,
   updateAdminCoupon,
 } from '../controllers/couponController.js'
+import {
+  getAdminContent,
+  listAdminContent,
+  resetAdminContent,
+  updateAdminContent,
+} from '../controllers/contentController.js'
+import {
+  deleteAdminMedia,
+  listAdminMedia,
+  uploadAdminMedia,
+} from '../controllers/mediaController.js'
 import { requireAdmin, requireAuth } from '../middleware/authMiddleware.js'
 
 /* Admin API — every route requires a session AND the admin role.
@@ -69,5 +80,15 @@ router.post('/coupons', createAdminCoupon)
 router.get('/coupons/:id', getAdminCoupon)
 router.patch('/coupons/:id', updateAdminCoupon)
 router.delete('/coupons/:id', deleteAdminCoupon)
+
+/* CMS — content + media (admin-only writes; reads include metadata). */
+router.get('/content', listAdminContent)
+router.get('/content/:key', getAdminContent)
+router.put('/content/:key', updateAdminContent)
+router.post('/content/:key/reset', resetAdminContent)
+
+router.get('/media', listAdminMedia)
+router.post('/media', uploadAdminMedia)
+router.delete('/media/:id', deleteAdminMedia)
 
 export default router

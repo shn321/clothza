@@ -1,8 +1,12 @@
 import { useState } from 'react'
+import { useSiteContent } from '../../hooks/useSiteContent.js'
 
 function Newsletter() {
+  const { content } = useSiteContent('site.newsletter')
   const [email, setEmail] = useState('')
   const [status, setStatus] = useState({ type: 'idle', message: '' })
+
+  if (content?.enabled === false) return null
 
   const handleSubmit = (e) => {
     e.preventDefault()
@@ -11,7 +15,7 @@ function Newsletter() {
       setStatus({ type: 'error', message: 'Please enter a valid email address.' })
       return
     }
-    setStatus({ type: 'success', message: "You're on the list. Welcome to CLOTHZA." })
+    setStatus({ type: 'success', message: content?.successMessage || "You're on the list. Welcome to CLOTHZA." })
     setEmail('')
   }
 
@@ -19,13 +23,13 @@ function Newsletter() {
     <section aria-labelledby="home-newsletter-heading" className="bg-parchment">
       <div className="clothza-container py-14 md:py-20">
         <div className="mx-auto flex w-full max-w-xl flex-col items-center text-center">
-          <p className="type-label">Newsletter</p>
+          {content?.eyebrow ? <p className="type-label">{content.eyebrow}</p> : null}
           <h2 id="home-newsletter-heading" className="type-h2 mt-2">
-            Stay in the know.
+            {content?.heading || 'Stay in the know.'}
           </h2>
-          <p className="type-body-muted mt-4">
-            Be the first to discover new arrivals, collections and exclusive offers.
-          </p>
+          {content?.description ? (
+            <p className="type-body-muted mt-4">{content.description}</p>
+          ) : null}
           <form onSubmit={handleSubmit} noValidate className="mt-6 w-full">
             <label htmlFor="home-newsletter-email" className="field-label text-left">
               Email address
@@ -36,7 +40,7 @@ function Newsletter() {
                 name="email"
                 type="email"
                 autoComplete="email"
-                placeholder="you@example.com"
+                placeholder={content?.placeholder || 'you@example.com'}
                 value={email}
                 onChange={(e) => {
                   setEmail(e.target.value)
@@ -47,7 +51,7 @@ function Newsletter() {
                 className="field-input flex-1"
               />
               <button type="submit" className="btn btn-primary sm:w-auto">
-                Subscribe
+                {content?.buttonText || 'Subscribe'}
               </button>
             </div>
             <p
@@ -58,7 +62,7 @@ function Newsletter() {
                 status.type === 'error' ? 'text-red-800' : 'text-fog'
               }`}
             >
-              {status.message || '\u00A0'}
+              {status.message || ' '}
             </p>
           </form>
         </div>

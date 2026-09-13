@@ -1,9 +1,9 @@
 import mongoose from 'mongoose'
-import Order, { ORDER_STATUSES } from '../models/Order.js'
+import Order, { CANCELLABLE_STATUSES, ORDER_STATUSES } from '../models/Order.js'
 import Product from '../models/Product.js'
 import Review, { REVIEW_STATUSES } from '../models/Review.js'
 import User from '../models/User.js'
-import { serializeOrder } from './orderController.js'
+import { restoreStock, serializeOrder } from './orderController.js'
 import { notifyOrderEvent } from '../services/notificationService.js'
 import { recalcProductRating, serializeAdminReview } from './reviewController.js'
 
@@ -121,6 +121,17 @@ function validateProductInput(body, { partial = false } = {}) {
       out.originalPrice = v
     }
   }
+  if (src.discountPercentage !== undefined) {
+    if (src.discountPercentage === null || src.discountPercentage === '') {
+      out.discountPercentage = null
+    } else {
+      const v = Number(src.discountPercentage)
+      if (!Number.isFinite(v) || v < 0 || v > 100) {
+        return fail('Discount must be a number between 0 and 100.')
+      }
+      out.discountPercentage = v
+    }
+  }
   if (src.category !== undefined || !partial) {
     const category = toStr(src.category).toLowerCase()
     if (!category) return fail('Category is required.')
@@ -182,6 +193,10 @@ function validateProductInput(body, { partial = false } = {}) {
       if (typeof raw !== 'boolean') return fail(`"${spec}" must be true or false.`)
       out[camel] = raw
     }
+  }
+  if (src.isPublished !== undefined) {
+    if (typeof src.isPublished !== 'boolean') return fail('"isPublished" must be true or false.')
+    out.isPublished = src.isPublished
   }
   return { value: out }
 }
@@ -281,6 +296,22 @@ export async function listAdminProducts(req, res, next) {
       const rx = new RegExp(escapeRegExp(String(req.query.q).trim().slice(0, 100)), 'i')
       filter.$or = [{ name: rx }, { slug: rx }, { description: rx }, { category: rx }, { tags: rx }]
     }
+    if (req.query.published !== undefined && String(req.query.published).trim() !== '') {
+      const published = String(req.query.published).toLowerCase().trim()
+      if (!['true', 'false', 'all'].includes(published)) {
+        return bad(res, 400, 'Invalid published filter. Allowed: true, false, all.')
+      }
+      if (published !== 'all') filter.isPublished = published === 'true' ? { $ne: false } : false
+    }
+    if (req.query.stock !== undefined && String(req.query.stock).trim() !== '') {
+      const stock = String(req.query.stock).toLowerCase().trim()
+      if (!['all', 'out', 'low', 'in'].includes(stock)) {
+        return bad(res, 400, 'Invalid stock filter. Allowed: all, out, low, in.')
+      }
+      if (stock === 'out') filter.stock = 0
+      else if (stock === 'low') filter.stock = { $gt: 0, $lte: LOW_STOCK_THRESHOLD }
+      else if (stock === 'in') filter.stock = { $gt: 0 }
+    }
     const sortKey = ALLOWED_SORTS.includes(req.query.sort) ? req.query.sort : 'newest'
     const page = parsePage(req.query.page)
     const limit = parseLimit(req.query.limit)
@@ -361,6 +392,12 @@ export async function updateAdminProduct(req, res, next) {
     if (value.slug && value.slug !== product.slug) {
       const clash = await Product.findOne({ slug: value.slug, _id: { $ne: product._id } }).lean()
       if (clash) return bad(res, 409, 'A product with this slug already exists.')
+      /* Keep the old slug so existing /product/:slug links and order
+         history references keep resolving instead of breaking. */
+      const prev = Array.isArray(product.previousSlugs) ? product.previousSlugs : []
+      if (!prev.includes(product.slug)) {
+        product.previousSlugs = [...prev, product.slug].slice(-10)
+      }
     }
     Object.assign(product, value)
     await product.save()
@@ -371,14 +408,31 @@ export async function updateAdminProduct(req, res, next) {
   }
 }
 
-/* DELETE /api/admin/products/:id — hard delete of the catalog document
-   only. Order items keep full snapshots, so historic orders are
-   unaffected. Cart/wishlist lines referencing the product resolve to
-   null and are handled by those flows. */
+/* DELETE /api/admin/products/:id — safe delete.
+   Order items keep full snapshots, so historic orders are unaffected by
+   a delete; but products referenced by orders or reviews are BLOCKED
+   (409) unless ?force=true, preferring unpublish instead so review
+   history and order detail pages never lose their product. Cart and
+   wishlist lines referencing a deleted product resolve to null and are
+   handled gracefully by those flows. */
 export async function deleteAdminProduct(req, res, next) {
   try {
     const product = await findProductByIdParam(req.params.id)
     if (!product) return bad(res, 404, 'Product not found.')
+    const force = String(req.query.force || '').toLowerCase() === 'true'
+    if (!force) {
+      const [orderCount, reviewCount] = await Promise.all([
+        Order.countDocuments({ 'items.product': product._id }),
+        Review.countDocuments({ product: product._id }),
+      ])
+      if (orderCount > 0 || reviewCount > 0) {
+        return res.status(409).json({
+          success: false,
+          message: `This product is referenced by ${orderCount} order(s) and ${reviewCount} review(s). Unpublish it instead of deleting, or delete with force to proceed anyway.`,
+          data: { orderCount, reviewCount },
+        })
+      }
+    }
     await Product.deleteOne({ _id: product._id })
     return res.status(200).json({ success: true, message: 'Product deleted.' })
   } catch (err) {
@@ -399,7 +453,7 @@ export async function listAdminOrders(req, res, next) {
     }
     if (req.query.paymentStatus !== undefined && String(req.query.paymentStatus).trim() !== '') {
       const ps = String(req.query.paymentStatus).trim().toLowerCase()
-      if (!['pending', 'paid', 'failed', 'refunded'].includes(ps)) {
+      if (!['pending', 'paid', 'failed', 'not_applicable', 'refunded'].includes(ps)) {
         return bad(res, 400, 'Invalid payment status.')
       }
       filter.paymentStatus = ps
@@ -481,6 +535,12 @@ export async function updateAdminOrderStatus(req, res, next) {
     const allowed = ADMIN_TRANSITIONS[order.orderStatus] || []
     if (!allowed.includes(nextStatus)) {
       return bad(res, 409, `Cannot move order from "${order.orderStatus}" to "${nextStatus}".`)
+    }
+    /* Step 30 — an admin cancellation restores reserved stock exactly
+       like the customer cancel path, so inventory stays correct.
+       Only cancellable (non-final, non-shipped) orders can reach here. */
+    if (nextStatus === 'cancelled' && CANCELLABLE_STATUSES.includes(order.orderStatus)) {
+      await restoreStock(order.items.map((l) => ({ productId: l.product, qty: l.qty })))
     }
     order.orderStatus = nextStatus
     if (nextStatus === 'cancelled') order.cancelledAt = new Date()

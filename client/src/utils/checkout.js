@@ -23,10 +23,13 @@ export const DELIVERY_METHODS = [
   },
 ]
 
+/* Step 30 — portfolio checkout offers exactly two payment methods:
+   Cash on Delivery, and a clearly-labelled simulated Online Payment
+   (Demo). No real gateway is involved; the demo flow is a frontend
+   simulation backed by server-computed totals. */
 export const PAYMENT_METHODS = [
   { id: 'cod', label: 'Cash on Delivery' },
-  { id: 'card', label: 'Credit / Debit Card' },
-  { id: 'upi', label: 'UPI' },
+  { id: 'demo_online', label: 'Online Payment (Demo)', hint: 'Simulated test payment — no real money moves.' },
 ]
 
 export const COUNTRIES = [

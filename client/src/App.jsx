@@ -7,10 +7,12 @@ import Account from './pages/Account.jsx'
 import OrderDetail from './pages/account/OrderDetail.jsx'
 import Notifications from './pages/account/Notifications.jsx'
 import AdminLayout from './pages/admin/AdminLayout.jsx'
+import Content from './pages/admin/Content.jsx'
 import CouponForm from './pages/admin/CouponForm.jsx'
 import Coupons from './pages/admin/Coupons.jsx'
 import Customers from './pages/admin/Customers.jsx'
 import Dashboard from './pages/admin/Dashboard.jsx'
+import MediaLibrary from './pages/admin/MediaLibrary.jsx'
 import OrderDetailAdmin from './pages/admin/OrderDetail.jsx'
 import Orders from './pages/admin/Orders.jsx'
 import Reviews from './pages/admin/Reviews.jsx'
@@ -92,39 +94,48 @@ function App() {
           <Route path="coupons/new" element={<CouponForm />} />
           <Route path="coupons/:id/edit" element={<CouponForm />} />
           <Route path="customers" element={<Customers />} />
+          <Route path="content" element={<Content />} />
+          <Route path="content/media" element={<MediaLibrary />} />
         </Route>
         <Route path="/wishlist" element={<Wishlist />} />
         <Route path="/cart" element={<Cart />} />
-        <Route path="/checkout" element={<Checkout />} />
+        <Route
+          path="/checkout"
+          element={
+            <ProtectedRoute>
+              <Checkout />
+            </ProtectedRoute>
+          }
+        />
         <Route path="/order-confirmation" element={<OrderConfirmation />} />
         <Route
           path="/contact"
           element={
-            <Placeholder eyebrow="Contact" title="Contact" note="Minimal placeholder. Contact page comes later." />
+            <Placeholder page="contact" eyebrow="Contact" title="Contact" note="Minimal placeholder. Contact page comes later." />
           }
         />
         <Route
           path="/shipping"
           element={
-            <Placeholder eyebrow="Shipping" title="Shipping" note="Minimal placeholder. Shipping info comes later." />
+            <Placeholder page="shipping" eyebrow="Shipping" title="Shipping" note="Minimal placeholder. Shipping info comes later." />
           }
         />
         <Route
           path="/returns"
           element={
-            <Placeholder eyebrow="Returns" title="Returns" note="Minimal placeholder. Returns info comes later." />
+            <Placeholder page="returns" eyebrow="Returns" title="Returns" note="Minimal placeholder. Returns info comes later." />
           }
         />
         <Route
           path="/faq"
           element={
-            <Placeholder eyebrow="FAQ" title="FAQ" note="Minimal placeholder. FAQ page comes later." />
+            <Placeholder page="faq" eyebrow="FAQ" title="FAQ" note="Minimal placeholder. FAQ page comes later." />
           }
         />
         <Route
           path="/about"
           element={
-            <Placeholder eyebrow="About" title="About" note="Minimal placeholder. About page comes later." />
+            <Placeholder page="about" eyebrow="About" title="About" note="Minimal placeholder. About page comes later." />
           }
         />
         <Route

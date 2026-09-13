@@ -103,6 +103,7 @@ function OrderDetail() {
       <p className="type-body-muted mt-1">
         Placed {order.createdAt ? new Date(order.createdAt).toLocaleString('en-IN') : '—'} ·{' '}
         {order.paymentMethodLabel || order.paymentMethod} · {order.paymentStatus}
+        {order.isDemoPayment ? ' · Demo (simulated, no real charge)' : ''}
       </p>
 
       {notice && (
@@ -147,9 +148,21 @@ function OrderDetail() {
                 <dt className="text-fog">Subtotal</dt>
                 <dd className="tabular-nums">₹{Number(order.subtotal).toLocaleString('en-IN')}</dd>
               </div>
+              {Number(order.discount) > 0 && (
+                <div className="flex justify-between">
+                  <dt className="text-fog">
+                    Discount{order.coupon?.code ? ` (${order.coupon.code})` : ''}
+                  </dt>
+                  <dd className="tabular-nums">−₹{Number(order.discount).toLocaleString('en-IN')}</dd>
+                </div>
+              )}
               <div className="flex justify-between">
                 <dt className="text-fog">Shipping ({order.deliveryMethod?.label || order.deliveryMethod?.id})</dt>
                 <dd className="tabular-nums">₹{Number(order.shippingCost).toLocaleString('en-IN')}</dd>
+              </div>
+              <div className="flex justify-between">
+                <dt className="text-fog">Tax</dt>
+                <dd className="tabular-nums">₹{Number(order.tax ?? 0).toLocaleString('en-IN')}</dd>
               </div>
               <div className="flex justify-between font-medium">
                 <dt>Total</dt>

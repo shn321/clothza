@@ -1,29 +1,43 @@
 import { Link } from 'react-router-dom'
 import { useProducts } from '../../context/ProductsContext.jsx'
+import { useSiteContent } from '../../hooks/useSiteContent.js'
 import ProductCard from '../product/ProductCard.jsx'
 import { ProductGridSkeleton, ProductLoadError } from '../product/ProductStates.jsx'
 
 function NewArrivals() {
   const { getNewArrivals, loading, error, retry } = useProducts()
-  const items = getNewArrivals(4)
+  const { content } = useSiteContent('homepage.newArrivals')
+
+  if (content?.enabled === false) return null
+
+  const count =
+    Number.isInteger(content?.count) && content.count > 0 ? Math.min(content.count, 12) : 4
+  const items = getNewArrivals(count)
 
   return (
     <section aria-labelledby="home-new-heading" className="bg-cream">
       <div className="clothza-container py-14 md:py-20">
         <div className="flex items-end justify-between gap-6">
           <div>
-            <p className="type-label">Just landed</p>
+            {content?.eyebrow ? <p className="type-label">{content.eyebrow}</p> : null}
             <h2 id="home-new-heading" className="type-h2 mt-2">
-              New Arrivals
+              {content?.heading || 'New Arrivals'}
             </h2>
+            {content?.description ? (
+              <p className="type-body-muted mt-2 max-w-xl">{content.description}</p>
+            ) : null}
           </div>
-          <Link to="/shop" className="btn btn-secondary" aria-label="View all new arrivals">
-            View All
+          <Link
+            to={content?.viewAllLink || '/shop'}
+            className="btn btn-secondary"
+            aria-label="View all new arrivals"
+          >
+            {content?.viewAllText || 'View All'}
           </Link>
         </div>
 
         {loading ? (
-          <ProductGridSkeleton count={4} />
+          <ProductGridSkeleton count={count} />
         ) : error ? (
           <ProductLoadError message={error} onRetry={retry} />
         ) : (
