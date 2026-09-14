@@ -33,13 +33,25 @@ export function signAuthToken(userId) {
 
 export function cookieOptions() {
   const isProduction = process.env.NODE_ENV === 'production'
-  /* Cross-domain deployments (app on one domain, API on another) need
-     SameSite=None (always with Secure) or the browser will not send the
-     session cookie on API fetches. Same-site setups keep the Lax
-     default. Set COOKIE_SAMESITE=none only when the frontend and API
-     live on different sites. */
-  const raw = String(process.env.COOKIE_SAMESITE || 'lax').trim().toLowerCase()
-  const sameSite = raw === 'none' ? 'none' : raw === 'strict' ? 'strict' : 'lax'
+  /* Cross-site deployments (app on one domain, API on another — e.g.
+     Vercel frontend + Render API) need SameSite=None (always with
+     Secure) or the browser will neither store the login Set-Cookie
+     nor send it back on later API fetches, so every authenticated
+     request (including /api/auth/me and /api/admin/*) 401s with
+     "Not authenticated" even though login appeared to succeed.
+     Same-site setups keep the Lax default. An explicit
+     COOKIE_SAMESITE value is always honored; when it is unset in
+     production with CLIENT_URL configured, None is the default so a
+     missing env var cannot silently break cross-site sessions. */
+  const explicit = String(process.env.COOKIE_SAMESITE || '').trim().toLowerCase()
+  let sameSite
+  if (explicit === 'none' || explicit === 'strict' || explicit === 'lax') {
+    sameSite = explicit
+  } else if (!explicit && isProduction && String(process.env.CLIENT_URL || '').trim()) {
+    sameSite = 'none'
+  } else {
+    sameSite = 'lax'
+  }
   return {
     httpOnly: true,
     secure: isProduction || sameSite === 'none',
